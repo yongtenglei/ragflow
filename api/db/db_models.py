@@ -27,7 +27,7 @@ from playhouse.migrate import MySQLMigrator, PostgresqlMigrator, migrate
 from peewee import (
     BigIntegerField, BooleanField, CharField,
     CompositeKey, IntegerField, TextField, FloatField, DateTimeField,
-    Field, Model, Metadata
+    Field, ForeignKeyField, Model, Metadata
 )
 from playhouse.pool import PooledMySQLDatabase, PooledPostgresqlDatabase
 
@@ -550,6 +550,46 @@ class UserTenant(DataBaseModel):
 
     class Meta:
         db_table = "user_tenant"
+
+
+class Team(DataBaseModel):
+    id = CharField(max_length=32, primary_key=True)
+    name = CharField(max_length=255, null=False)
+    owner = ForeignKeyField(User, backref='teams', on_delete='CASCADE', null=False, help_text="Owner of the team")
+    avatar = CharField(max_length=255, default="logo.svg", help_text="team logo, default is logo.svg")
+    balance = IntegerField(default=0, help_text="team balance")
+    teamDomain = CharField(max_length=255, null=False, help_text="team domain")
+
+    class Meta:
+        db_table = 'team'
+        indexes = (
+            (('owner',), True),
+        )
+
+    def __str__(self):
+        return f"Team {self.name} - Owned by {self.owner.nickname}"
+
+
+class UserStatusEnum(Enum):
+    active = 'active'
+    forbidden = 'forbidden'
+
+
+class UserTeam(DataBaseModel):
+    team = ForeignKeyField(Team, backref='user_teams', on_delete='CASCADE', null=False)
+    user = ForeignKeyField(User, backref='user_teams', on_delete='CASCADE', null=False)
+    avatar = CharField(max_length=255, default="avatar1.png")
+    name = CharField(max_length=255, null=False)
+    status = CharField(max_length=20, choices=[(tag, tag.value) for tag in UserStatusEnum], default=UserStatusEnum.active)
+    default_team = BooleanField(default=False)
+    role = CharField(max_length=255, null=True)
+
+    class Meta:
+        db_table = 'user_team'
+        primary_key = CompositeKey('user', 'team')
+
+    def __str__(self):
+        return f"User {self.user.nickname} in Team {self.team.name}"
 
 
 class InvitationCode(DataBaseModel):
