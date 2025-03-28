@@ -30,6 +30,7 @@ from openai import OpenAI
 from openai.lib.azure import AzureOpenAI
 from zhipuai import ZhipuAI
 
+from mcp import ClientSession, Tool
 from rag.nlp import is_chinese, is_english
 from rag.utils import num_tokens_from_string
 
@@ -321,6 +322,127 @@ class QWenChat(Base):
         if self.is_reasoning_model(self.model_name):
             super().__init__(key, model_name, "https://dashscope.aliyuncs.com/compatible-mode/v1")
 
+    def _wrap_chat_tools(self, tool_list: list[Tool]) -> list[dict]:
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": {
+                        "type": "object",
+                        "properties": tool.inputSchema.get("properties", {}),
+                        "required": tool.inputSchema.get("required", []),
+                    },
+                },
+            }
+            for tool in tool_list
+        ]
+
+        return tools
+
+    async def chat_with_tools(self, system: str, history: list, gen_conf: dict, session: ClientSession) -> tuple[str, int]:
+        print("start chat with tools")
+
+        if "max_tokens" in gen_conf:
+            del gen_conf["max_tokens"]
+        # if self.is_reasoning_model(self.model_name):
+        #     return super().chat(system, history, gen_conf)
+
+        stream_flag = str(os.environ.get("QWEN_CHAT_BY_STREAM", "true")).lower() == "true"
+        print("stream_flag")
+        if not stream_flag:
+            from http import HTTPStatus
+
+            tool_list = await session.list_tools()
+            print(f"{tool_list=}", flush=True)
+            tools_name = [tool.name for tool in tool_list.tools]
+            tools = self._wrap_chat_tools(tool_list=tool_list.tools)
+            print(f"{tools=}")
+
+            if system:
+                history.insert(0, {"role": "system", "content": system})
+
+            print("-" * 60)
+            # 模型的第一轮调用
+            i = 1
+            print(f"{self.model_name}")
+
+            response = Generation.call(self.model_name, messages=history, result_format="message", tools=tools, **gen_conf)
+            print(f"{response=}")
+            ans = ""
+            tk_count = 0
+            if response.status_code == HTTPStatus.OK:
+                ans += response.output.choices[0].message["content"]
+                print(f"\n第{i}轮大模型输出信息：{ans}\n")
+                assistant_output = response.output.choices[0].message
+                if assistant_output.content is None:
+                    assistant_output.content = ""
+                if "tool_calls" not in assistant_output:  # 如果模型判断无需调用工具，则将assistant的回复直接打印出来，无需进行模型的第二轮调用
+                    print(f"无需调用工具，我可以直接回复：{ans}")
+                    tk_count += self.total_token_count(response)
+                    if response.output.choices[0].get("finish_reason", "") == "length":
+                        if is_chinese([ans]):
+                            ans += LENGTH_NOTIFICATION_CN
+                        else:
+                            ans += LENGTH_NOTIFICATION_EN
+                    return ans, tk_count
+
+                tk_count += self.total_token_count(response)
+                history.append(assistant_output)
+
+                while "tool_calls" in assistant_output:
+                    # 如果判断需要调用查询天气工具，则运行查询天气工具
+                    tool_info = {"content": "", "role": "tool", "tool_call_id": assistant_output.tool_calls[0]["id"]}
+                    tool_name = assistant_output.tool_calls[0]["function"]["name"]
+                    assert tool_name in tools_name, f"get {tool_name=}, {tools_name=}"
+                    if tool_name:
+                        # 提取位置参数信息
+                        arguments = json.loads(assistant_output.tool_calls[0]["function"]["arguments"])
+                        print(f"tool {arguments=}")
+                        tool_response = await session.call_tool(name=tool_name, arguments=arguments)
+                        assert tool_response and not tool_response.isError, f"get {tool_response}"
+                        if tool_response.content:
+                            tool_info["content"] = tool_response.content[0].text
+                        else:
+                            # TODO: check me later
+                            pass
+                    tool_output = tool_info["content"]
+                    print(f"工具输出信息：{tool_output}\n")
+                    print("-" * 60)
+                    history.append(tool_info)
+
+                    response = Generation.call(self.model_name, messages=history, result_format="message", tools=tools, **gen_conf)
+                    if response.output.choices[0].get("finish_reason", "") == "length":
+                        tk_count += self.total_token_count(response)
+                        if is_chinese([ans]):
+                            ans += LENGTH_NOTIFICATION_CN
+                        else:
+                            ans += LENGTH_NOTIFICATION_EN
+                        return ans, tk_count
+
+                    tk_count += self.total_token_count(response)
+                    assistant_output = response.output.choices[0].message
+                    if assistant_output.content is None:
+                        assistant_output.content = ""
+                    history.append(response)
+                    i += 1
+                    print(f"第{i}轮大模型输出信息：{assistant_output}\n")
+                ans += assistant_output["content"]
+                print(f"最终答案：{assistant_output['content']}.")
+                return ans, tk_count
+            else:
+                return "**ERROR**: " + response.message, tk_count
+        else:
+            result_list = []
+            async for result in self._chat_streamly_with_tools(system, history, gen_conf, session, incremental_output=True):
+                result_list.append(result)
+            error_msg_list = [result for result in result_list if str(result).find("**ERROR**") >= 0]
+            if len(error_msg_list) > 0:
+                return "**ERROR**: " + "".join(error_msg_list), 0
+            else:
+                return "".join(result_list[:-1]), result_list[-1]
+
     def chat(self, system, history, gen_conf):
         if "max_tokens" in gen_conf:
             del gen_conf["max_tokens"]
@@ -357,6 +479,140 @@ class QWenChat(Base):
             else:
                 return "".join(result_list[:-1]), result_list[-1]
 
+    def _wrap_toolcall_message(self, old_message, message):
+        if not old_message:
+            return message
+        print(message)
+        print(1)
+
+        tool_call_id = message["tool_calls"][0].get("id")
+        if tool_call_id:
+            old_message.tool_calls[0]["id"] = tool_call_id
+        function = message.tool_calls[0]["function"]
+        print(2)
+        if function:
+            print(3)
+            if function.get("name"):
+                print(4)
+                old_message.tool_calls[0]["function"]["name"] = function["name"]
+                print(5)
+            print(6)
+            if function.get("arguments"):
+                print(6)
+                print("##################################")
+                print(f"{function['arguments']=}")
+                print(f"{old_message.tool_calls[0]['function']['arguments']=}")
+                old_message.tool_calls[0]["function"]["arguments"] += function["arguments"]
+                print(f"{old_message.tool_calls[0]['function']['arguments']=}")
+                print("##################################")
+                print(7)
+            print(8)
+        return old_message
+
+    async def _chat_streamly_with_tools(self, system: str, history: list, gen_conf: dict, session: ClientSession, incremental_output=True):
+        from http import HTTPStatus
+
+        print("start chat streamly with tools")
+        tool_list = await session.list_tools()
+        print(f"{tool_list=}", flush=True)
+        # tools_name = [tool.name for tool in tool_list.tools]
+        tools = self._wrap_chat_tools(tool_list=tool_list.tools)
+        print(f"{tools=}")
+
+        if system:
+            history.insert(0, {"role": "system", "content": system})
+        if "max_tokens" in gen_conf:
+            del gen_conf["max_tokens"]
+        ans = ""
+        tk_count = 0
+        try:
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+            response = Generation.call(self.model_name, messages=history, result_format="message", tools=tools, stream=True, incremental_output=incremental_output, **gen_conf)
+            tool_info = {"content": "", "role": "tool"}
+            toolcall_message = None
+            print("????????????????????????????????????????????????????????????????????????????????????")
+            print(response)
+            finish_completion = False
+            counter = 1
+            while not finish_completion:
+                for resp in response:
+                    print(f"==========================={counter}================================")
+                    print(f"{resp=}")
+                    if resp.status_code == HTTPStatus.OK:
+                        ans = resp.output.choices[0].message.content
+                        print("########################################")
+                        print(f"{ans=}")
+
+                        assistant_output = resp.output.choices[0].message
+                        print("can you reach here")
+                        if assistant_output.content is None:
+                            assistant_output.content = ""
+                        if "tool_calls" not in assistant_output:
+                            print(f"无需调用工具，我可以直接回复：{ans}")
+                            tk_count += self.total_token_count(resp)
+                            if resp.output.choices[0].get("finish_reason", "") == "length":
+                                if is_chinese([ans]):
+                                    ans += LENGTH_NOTIFICATION_CN
+                                else:
+                                    ans += LENGTH_NOTIFICATION_EN
+                            finish_reason = resp.output.choices[0]["finish_reason"]
+                            if finish_reason == "stop":
+                                finish_completion = True
+                                yield ans
+                                break
+                            yield ans
+                            continue
+
+                        tk_count += self.total_token_count(resp)
+                        toolcall_message = self._wrap_toolcall_message(toolcall_message, assistant_output)
+                        print("wrapped tool_call in the middle")
+                        if "tool_calls" in assistant_output:
+                            print("tool_call in output!!!!!")
+                            tool_call_finish_reason = resp.output.choices[0]["finish_reason"]
+                            print(f"{tool_call_finish_reason=}")
+                            print(f"{tool_info}")
+                            if tool_call_finish_reason == "tool_calls":
+                                print("wraped toolcall_message")
+                                try:
+                                    tool_arguments = json.loads(toolcall_message.tool_calls[0]["function"]["arguments"])
+                                except Exception:
+                                    yield ans + "\n**ERROR**: " + resp.output.choices[0].message
+                                    break
+
+                                tool_name = toolcall_message.tool_calls[0]["function"]["name"]
+                                print(f"{toolcall_message=}")
+                                history.append(toolcall_message)
+                                tool_response = await session.call_tool(name=tool_name, arguments=tool_arguments)
+                                print(f"{tool_response=}")
+                                if tool_response.content:
+                                    print("extract tool respnse")
+                                    tool_info["content"] = tool_response.content[0].text
+                                    print("extract finished")
+                                tool_output = tool_info["content"]
+                                print(f"工具输出信息：{tool_output}\n")
+                                print("-" * 60)
+                                history.append(tool_info)
+                                tool_info = {"content": "", "role": "tool"}
+                                tool_name = ""
+                                tool_arguments = ""
+                                print("history after tool call")
+                                print(f"{history=}")
+                                response = Generation.call(self.model_name, messages=history, result_format="message", tools=tools, stream=True, **gen_conf)
+                                print("response generated after tool call")
+                                print(f"{response}")
+                            counter += 1
+                    else:
+                        yield (
+                            ans + "\n**ERROR**: " + resp.output.choices[0].message
+                            if not re.search(r" (key|quota)", str(resp.message).lower())
+                            else "Out of credit. Please set the API key in **settings > Model providers.**"
+                        )
+        except Exception as e:
+            logging.exception(msg="_chat_streamly_with_tool")
+            yield ans + "\n**ERROR**: " + str(e)
+        print("endddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")
+        yield tk_count
+
     def _chat_streamly(self, system, history, gen_conf, incremental_output=True):
         from http import HTTPStatus
 
@@ -388,6 +644,15 @@ class QWenChat(Base):
             yield ans + "\n**ERROR**: " + str(e)
 
         yield tk_count
+
+    async def chat_streamly_with_tools(self, system: str, history: list, gen_conf: dict, session: ClientSession, incremental_output=True):
+        if "max_tokens" in gen_conf:
+            del gen_conf["max_tokens"]
+        # if self.is_reasoning_model(self.model_name):
+        #     return super().chat_streamly(system, history, gen_conf)
+
+        async for txt in self._chat_streamly_with_tools(system, history, gen_conf, session, incremental_output=incremental_output):
+            yield txt
 
     def chat_streamly(self, system, history, gen_conf):
         if "max_tokens" in gen_conf:
