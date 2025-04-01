@@ -29,20 +29,3 @@ async def get_current_time() -> str:
 if __name__ == "__main__":
     # Initialize and run the server
     mcp.run(transport="stdio")
-
-# @mcp.tool()
-# async def get_forecast(city: str, days: int = 3) -> str:
-#     """Get a multi-day weather forecast"""
-#     url = f"{WEATHER_API}/{city}?format=j1"
-#     async with httpx.AsyncClient() as client:
-#         response = await client.get(url)
-#         data = response.json()
-#
-#     forecast = ""
-#     for day in data["weather"][:days]:
-#         date = day["date"]
-#         avg_temp = day["avgtempC"]
-#         desc = day["hourly"][0]["weatherDesc"][0]["value"]
-#         forecast += f"{date}: {desc}, avg temp {avg_temp}°C\n"
-#
-#     return forecast.strip()

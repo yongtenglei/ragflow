@@ -530,9 +530,12 @@ class QWenChat(Base):
             response = Generation.call(self.model_name, messages=history, result_format="message", tools=tools, stream=True, incremental_output=incremental_output, **gen_conf)
             tool_info = {"content": "", "role": "tool"}
             toolcall_message = None
+            tool_name = ""
+            tool_arguments = ""
             print("????????????????????????????????????????????????????????????????????????????????????")
             print(response)
             finish_completion = False
+            reasoning_start = False
             counter = 1
             while not finish_completion:
                 for resp in response:
@@ -540,13 +543,20 @@ class QWenChat(Base):
                     print(f"{resp=}")
                     if resp.status_code == HTTPStatus.OK:
                         ans = resp.output.choices[0].message.content
+                        if not ans:
+                            ans = resp.output.choices[0].message.reasoning_content
+                            if not reasoning_start:
+                                reasoning_start = True
+                                ans = "<think>" + ans
+                            else:
+                                ans = ans + "</think>"
                         print("########################################")
                         print(f"{ans=}")
 
                         assistant_output = resp.output.choices[0].message
                         print("can you reach here")
-                        if assistant_output.content is None:
-                            assistant_output.content = ""
+                        # if assistant_output.content is None:
+                        #     assistant_output.content = ""
                         if "tool_calls" not in assistant_output:
                             print(f"无需调用工具，我可以直接回复：{ans}")
                             tk_count += self.total_token_count(resp)
@@ -575,8 +585,12 @@ class QWenChat(Base):
                                 print("wraped toolcall_message")
                                 try:
                                     tool_arguments = json.loads(toolcall_message.tool_calls[0]["function"]["arguments"])
-                                except Exception:
-                                    yield ans + "\n**ERROR**: " + resp.output.choices[0].message
+                                except Exception as e:
+                                    logging.exception(msg="_chat_streamly_with_tool tool call error")
+                                    print(f"error {tool_arguments=}")
+                                    print(f"error occured: {toolcall_message=}")
+                                    yield ans + "\n**ERROR**: " + str(e)
+                                    finish_completion = True
                                     break
 
                                 tool_name = toolcall_message.tool_calls[0]["function"]["name"]
@@ -595,9 +609,10 @@ class QWenChat(Base):
                                 tool_info = {"content": "", "role": "tool"}
                                 tool_name = ""
                                 tool_arguments = ""
+                                toolcall_message = None
                                 print("history after tool call")
                                 print(f"{history=}")
-                                response = Generation.call(self.model_name, messages=history, result_format="message", tools=tools, stream=True, **gen_conf)
+                                response = Generation.call(self.model_name, messages=history, result_format="message", tools=tools, stream=True, incremental_output=incremental_output, **gen_conf)
                                 print("response generated after tool call")
                                 print(f"{response}")
                             counter += 1

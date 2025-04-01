@@ -385,21 +385,24 @@ class LLMBundle:
 
                 result = []
                 ans = ""
-                async for txt in self.mdl.chat_streamly_with_tools(system, history, gen_conf, session):
-                    if isinstance(txt, int):
-                        if not TenantLLMService.increase_usage(self.tenant_id, self.llm_type, txt, self.llm_name):
-                            logging.error("LLMBundle.chat_streamly can't update token usage for {}/CHAT llm_name: {}, content: {}".format(self.tenant_id, self.llm_name, txt))
+                try:
+                    async for txt in self.mdl.chat_streamly_with_tools(system, history, gen_conf, session):
+                        if isinstance(txt, int):
+                            if not TenantLLMService.increase_usage(self.tenant_id, self.llm_type, txt, self.llm_name):
+                                logging.error("LLMBundle.chat_streamly can't update token usage for {}/CHAT llm_name: {}, content: {}".format(self.tenant_id, self.llm_name, txt))
 
-                        result.append(txt)
-                        return result
+                            return result
 
-                    if txt.endswith("</think>"):
-                        ans = ans.rstrip("</think>")
+                        if txt.endswith("</think>"):
+                            ans = ans.rstrip("</think>")
 
-                    print("output: *************************")
-                    print(ans)
-                    ans += txt
-                    result.append(ans)
+                        print("output: *************************")
+                        print(ans)
+                        ans += txt
+                        result.append(ans)
+                except Exception:
+                    logging.exception(msg="LLMBundle caht_streamly_with_tools")
+                    return result
 
     def chat_streamly(self, system, history, gen_conf):
         if self.langfuse:
@@ -408,7 +411,7 @@ class LLMBundle:
         if self.is_tools:
             import trio
 
-            results = trio.run(self.chat_streamly_with_tools(system, history, gen_conf))
+            results = trio.run(lambda: self.chat_streamly_with_tools(system, history, gen_conf))
             print("okokkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk")
             print(results)
             for result in results:
