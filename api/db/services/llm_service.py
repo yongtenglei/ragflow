@@ -23,8 +23,6 @@ from api.db.db_models import DB, LLM, LLMFactories, TenantLLM
 from api.db.services.common_service import CommonService
 from api.db.services.langfuse_service import TenantLangfuseService
 from api.db.services.user_service import TenantService
-from mcp import ClientSession, StdioServerParameters, types
-from mcp.client.stdio import stdio_client
 from rag.llm import ChatModel, CvModel, EmbeddingModel, RerankModel, Seq2txtModel, TTSModel
 
 
@@ -223,6 +221,11 @@ class LLMBundle:
         else:
             self.langfuse = None
 
+    def bind_tools(self, client, tools):
+        if not self.is_tools:
+            return
+        self.mdl.bind_tools(client, tools)
+
     def encode(self, texts: list):
         if self.langfuse:
             generation = self.trace.generation(name="encode", model=self.llm_name, input={"texts": texts})
@@ -315,50 +318,27 @@ class LLMBundle:
         if self.langfuse:
             span.end()
 
-    # Optional: create a sampling callback
-    async def handle_sampling_message(
-        self,
-        message: types.CreateMessageRequestParams,
-    ) -> types.CreateMessageResult:
-        return types.CreateMessageResult(
-            role="assistant",
-            content=types.TextContent(
-                type="text",
-                text="Hello, world! from model",
-            ),
-            model=f"my-model-{self.llm_name}",
-            stopReason="endTurn-reason",
-        )
-
-    async def chat_with_tools(self, system, history, gen_conf) -> tuple[str, int]:
-        server_params = StdioServerParameters(
-            command="python",
-            args=["/home/infiniflow/workspace/ragflow/mcp/weather_server.py"],
-            env=None,
-        )
-        async with stdio_client(server_params) as (read, write):
-            async with ClientSession(read, write, sampling_callback=self.handle_sampling_message) as session:
-                # Initialize the connection
-                await session.initialize()
-                print("session initialized")
-                print(f"{stdio_client.__name__=}")
-
-                txt = await self.mdl.chat_with_tools(system, history, gen_conf, session)
-
-                # result = await session.call_tool("tool-name", arguments={"arg1": "value"})
-                print("output: *************************")
-                print(txt)
+    async def _chat_with_tools(self, system, history, gen_conf) -> tuple[str, int]:
+        try:
+            txt = await self.mdl.chat_with_tools(system, history, gen_conf)
+            print("output: *************************")
+            print(txt)
             return txt
+        except:
+            logging.exception("chat with tools in LLMBundle 2")
 
     def chat(self, system, history, gen_conf):
         print("bundle start to chat")
         if self.langfuse:
             generation = self.trace.generation(name="chat", model=self.llm_name, input={"system": system, "history": history})
 
-        if self.is_tools:
-            import asyncio
+        if self.is_tools and self.mdl.is_tools:
+            import trio
 
-            txt, used_tokens = asyncio.run(self.chat_with_tools(system, history, gen_conf))
+            try:
+                txt, used_tokens = trio.run(lambda: self._chat_with_tools(system, history, gen_conf))
+            except:
+                logging.exception("chat with tools in LLMBundle")
         else:
             txt, used_tokens = self.mdl.chat(system, history, gen_conf)
 
@@ -370,52 +350,43 @@ class LLMBundle:
 
         return txt
 
-    async def chat_streamly_with_tools(self, system, history, gen_conf):
-        server_params = StdioServerParameters(
-            command="python",
-            args=["/home/infiniflow/workspace/ragflow/mcp/weather_server.py"],
-            env=None,
-        )
-        async with stdio_client(server_params) as (read, write):
-            async with ClientSession(read, write, sampling_callback=self.handle_sampling_message) as session:
-                # Initialize the connection
-                await session.initialize()
-                print("session initialized")
-                print(f"{stdio_client.__name__=}")
+    async def _chat_streamly_with_tools(self, system, history, gen_conf):
+        result = []
+        ans = ""
+        try:
+            async for txt in self.mdl.chat_streamly_with_tools(system, history, gen_conf):
+                if isinstance(txt, int):
+                    if not TenantLLMService.increase_usage(self.tenant_id, self.llm_type, txt, self.llm_name):
+                        logging.error("LLMBundle.chat_streamly can't update token usage for {}/CHAT llm_name: {}, content: {}".format(self.tenant_id, self.llm_name, txt))
 
-                result = []
-                ans = ""
-                try:
-                    async for txt in self.mdl.chat_streamly_with_tools(system, history, gen_conf, session):
-                        if isinstance(txt, int):
-                            if not TenantLLMService.increase_usage(self.tenant_id, self.llm_type, txt, self.llm_name):
-                                logging.error("LLMBundle.chat_streamly can't update token usage for {}/CHAT llm_name: {}, content: {}".format(self.tenant_id, self.llm_name, txt))
-
-                            return result
-
-                        if txt.endswith("</think>"):
-                            ans = ans.rstrip("</think>")
-
-                        print("output: *************************")
-                        print(ans)
-                        ans += txt
-                        result.append(ans)
-                except Exception:
-                    logging.exception(msg="LLMBundle caht_streamly_with_tools")
                     return result
+
+                if txt.endswith("</think>"):
+                    ans = ans.rstrip("</think>")
+
+                print("output: *************************")
+                print(ans)
+                ans += txt
+                result.append(ans)
+        except Exception:
+            logging.exception(msg="LLMBundle caht_streamly_with_tools")
+            return result
 
     def chat_streamly(self, system, history, gen_conf):
         if self.langfuse:
             generation = self.trace.generation(name="chat_streamly", model=self.llm_name, input={"system": system, "history": history})
 
-        if self.is_tools:
+        if self.is_tools and self.mdl.is_tools:
             import trio
 
-            results = trio.run(lambda: self.chat_streamly_with_tools(system, history, gen_conf))
+            results = trio.run(lambda: self._chat_streamly_with_tools(system, history, gen_conf))
             print("okokkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk")
             print(results)
             for result in results:
                 yield result
+
+            if self.langfuse:
+                generation.end(output={"output": results[-1]})
         else:
             ans = ""
             for txt in self.mdl.chat_streamly(system, history, gen_conf):
