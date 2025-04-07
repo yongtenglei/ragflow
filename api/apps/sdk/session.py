@@ -20,6 +20,7 @@ import time
 from flask import Response, jsonify, request
 
 from agent.canvas import Canvas
+from api.apps.tools.server.function_call_server import SimpleFunctionCallServer
 from api.db import LLMType, StatusEnum
 from api.db.db_models import APIToken
 from api.db.services.api_service import API4ConversationService
@@ -32,7 +33,7 @@ from api.db.services.file_service import FileService
 from api.db.services.knowledgebase_service import KnowledgebaseService
 from api.db.services.llm_service import LLMBundle
 from api.utils import get_uuid
-from api.utils.api_utils import get_error_data_result, get_result, token_required, validate_request
+from api.utils.api_utils import get_error_data_result, get_result, get_tools, token_required, validate_request
 
 
 @manager.route("/chats/<chat_id>/sessions", methods=["POST"])  # noqa: F821
@@ -118,7 +119,7 @@ def create_agent_session(tenant_id, agent_id):
 
     for ans in canvas.run(stream=False):
         pass
-    
+
     cvs.dsl = json.loads(str(canvas))
     conv = {"id": get_uuid(), "dialog_id": cvs.id, "user_id": user_id, "message": [{"role": "assistant", "content": canvas.get_prologue()}], "source": "agent", "dsl": cvs.dsl}
     API4ConversationService.save(**conv)
@@ -245,6 +246,9 @@ def chat_completion_openai_like(tenant_id, chat_id):
     msg = None
     msg = [m for m in messages if m["role"] != "system" and (m["role"] != "assistant" or msg)]
 
+    tools = get_tools()
+    toolcall_session = SimpleFunctionCallServer()
+
     if req.get("stream", True):
         # The value for the usage field on all chunks except for the last one will be null.
         # The usage field on the last chunk contains token usage statistics for the entire request.
@@ -264,7 +268,7 @@ def chat_completion_openai_like(tenant_id, chat_id):
             }
 
             try:
-                for ans in chat(dia, msg, True):
+                for ans in chat(dia, msg, True, toolcall_session=toolcall_session, tools=tools):
                     answer = ans["answer"]
 
                     reasoning_match = re.search(r"<think>(.*?)</think>", answer, flags=re.DOTALL)
@@ -327,7 +331,7 @@ def chat_completion_openai_like(tenant_id, chat_id):
         return resp
     else:
         answer = None
-        for ans in chat(dia, msg, False):
+        for ans in chat(dia, msg, False, toolcall_session=toolcall_session, tools=tools):
             # focus answer content only
             answer = ans
             break
