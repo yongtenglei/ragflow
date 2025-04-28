@@ -22,12 +22,14 @@ from api.db.services.user_service import TenantService
 from api.db.services.user_canvas_version import UserCanvasVersionService
 from api.settings import RetCode
 from api.utils import get_uuid
+from api.utils.canvas_util import Python3TemplateTransformer
 from api.utils.api_utils import get_json_result, server_error_response, validate_request, get_data_error_result
 from agent.canvas import Canvas
 from peewee import MySQLDatabase, PostgresqlDatabase
 from api.db.db_models import APIToken
 import logging
 import time
+
 
 @manager.route('/templates', methods=['GET'])  # noqa: F821
 @login_required
@@ -81,8 +83,6 @@ def save():
     UserCanvasVersionService.insert( user_canvas_id=req["id"], dsl=req["dsl"], title="{0}_{1}".format(req["title"], time.strftime("%Y_%m_%d_%H_%M_%S")))
     UserCanvasVersionService.delete_all_versions(req["id"])
     return get_json_result(data=req)
-
- 
 
 
 @manager.route('/get/<canvas_id>', methods=['GET'])  # noqa: F821
@@ -291,6 +291,8 @@ def test_db_connect():
         return get_json_result(data="Database Connection Successful!")
     except Exception as e:
         return server_error_response(e)
+
+
 #api get list version dsl of canvas
 @manager.route('/getlistversion/<canvas_id>', methods=['GET'])  # noqa: F821
 @login_required
@@ -300,6 +302,8 @@ def getlistversion(canvas_id):
         return get_json_result(data=list)
     except Exception as e:
         return get_data_error_result(message=f"Error getting history files: {e}")
+
+
 #api get version dsl of canvas
 @manager.route('/getversion/<version_id>', methods=['GET'])  # noqa: F821
 @login_required
@@ -311,6 +315,8 @@ def getversion( version_id):
             return get_json_result(data=version.to_dict())
     except Exception as e:
         return get_json_result(data=f"Error getting history file: {e}")
+
+
 @manager.route('/listteam', methods=['GET'])  # noqa: F821
 @login_required
 def list_kbs():
@@ -327,6 +333,8 @@ def list_kbs():
         return get_json_result(data={"kbs": kbs, "total": total})
     except Exception as e:
         return server_error_response(e)
+
+
 @manager.route('/setting', methods=['POST'])  # noqa: F821
 @validate_request("id", "title", "permission")
 @login_required
@@ -349,4 +357,49 @@ def setting():
             data=False, message='Only owner of canvas authorized for this operation.',
             code=RetCode.OPERATING_ERROR)
     num= UserCanvasService.update_by_id(req["id"], flow)
+
+
+@manager.route("/run_code", methods=["POST"])  # noqa: F821
+@validate_request("language", "code", "arguments")
+@login_required
+def run_code():
+    req = request.get_json()
+    language = req.get("language")
+    if language != "python3":
+        return get_data_error_result(f"Not support language {language}")
+    arguments = req.get("arguments")
+
+    code = """
+def main() -> dict:
+    import numpy as np
+    arr = np.array([1, 2, 3]).tolist()
+
+    return {
+        "result": arr
+    }
+"""
+    runner_script, _ = Python3TemplateTransformer.transform_caller(code, arguments)
+
+    import requests
+
+    try:
+        resp = requests.post(url="http://127.0.0.1:8194/v1/sandbox/run", json={"language": "python3", "code": runner_script, "preload": "", "enable_network": True})
+        if resp.status_code == 200:
+            print("====================================")
+            body = resp.json()
+            print("after body")
+            if body:
+                print(f"{body=}")
+                data = {
+                    "code": body.get("code", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"),
+                    "message": body.get("message", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"),
+                    "data ": {"stdout ": body["data"].get("stdout", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"), "error ": body["data"].get("error", "xxxxxxxxxxxxxxxxxxxxxxxxxxx")},
+                }
+                return get_json_result(data=data)
+        else:
+            print("error code")
+            return server_error_response("Code runing internal error")
+
+    except Exception as e:
+        return server_error_response(e)
     return get_json_result(data=num)
