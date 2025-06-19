@@ -1,35 +1,28 @@
-import { ILogicNode } from '@/interfaces/database/flow';
+import { IToolNode } from '@/interfaces/database/agent';
 import { NodeProps, Position } from '@xyflow/react';
 import { memo } from 'react';
+import { NodeHandleId } from '../../constant';
 import { CommonHandle } from './handle';
-import { LeftHandleStyle, RightHandleStyle } from './handle-icon';
+import { LeftHandleStyle } from './handle-icon';
 import NodeHeader from './node-header';
 import { NodeWrapper } from './node-wrapper';
 import { ToolBar } from './toolbar';
 
-export function InnerLogicNode({
+function InnerToolNode({
   id,
   data,
   isConnectable = true,
   selected,
-}: NodeProps<ILogicNode>) {
+}: NodeProps<IToolNode>) {
   return (
     <ToolBar selected={selected} id={id} label={data.label}>
       <NodeWrapper>
         <CommonHandle
-          id="c"
-          type="source"
-          position={Position.Left}
+          id={NodeHandleId.End}
+          type="target"
+          position={Position.Top}
           isConnectable={isConnectable}
           style={LeftHandleStyle}
-          nodeId={id}
-        ></CommonHandle>
-        <CommonHandle
-          type="source"
-          position={Position.Right}
-          isConnectable={isConnectable}
-          style={RightHandleStyle}
-          id="b"
           nodeId={id}
         ></CommonHandle>
         <NodeHeader id={id} name={data.name} label={data.label}></NodeHeader>
@@ -38,4 +31,4 @@ export function InnerLogicNode({
   );
 }
 
-export const LogicNode = memo(InnerLogicNode);
+export const ToolNode = memo(InnerToolNode);
