@@ -16,7 +16,7 @@ RUN --mount=type=bind,from=infiniflow/ragflow_deps:latest,source=/huggingface.co
     tar --exclude='.*' -cf - \
         /huggingface.co/InfiniFlow/text_concat_xgb_v1.0 \
         /huggingface.co/InfiniFlow/deepdoc \
-        | tar -xf - --strip-components=3 -C /ragflow/rag/res/deepdoc
+        | tar -xf - --strip-components=3 -C /ragflow/rag/res/deepdoc 
 RUN --mount=type=bind,from=infiniflow/ragflow_deps:latest,source=/huggingface.co,target=/huggingface.co \
     if [ "$LIGHTEN" != "1" ]; then \
         (tar -cf - \
@@ -73,7 +73,31 @@ RUN if [ "$NEED_MIRROR" == "1" ]; then \
     pipx install uv
 
 ENV PYTHONDONTWRITEBYTECODE=1 DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
-ENV PATH="/root/.local/bin:${PATH}"
+ENV PATH=/root/.local/bin:$PATH
+
+# nodejs 12.22 on Ubuntu 22.04 is too old
+RUN --mount=type=cache,id=ragflow_apt,target=/var/cache/apt,sharing=locked \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt purge -y nodejs npm cargo && \
+    apt autoremove -y && \
+    apt update && \
+    apt install -y nodejs
+
+# A modern version of cargo is needed for the latest version of the Rust compiler.
+RUN apt update && apt install -y curl build-essential \
+    && if [ "$NEED_MIRROR" == "1" ]; then \
+         # Use TUNA mirrors for rustup/rust dist files
+         export RUSTUP_DIST_SERVER="https://mirrors.tuna.tsinghua.edu.cn/rustup"; \
+         export RUSTUP_UPDATE_ROOT="https://mirrors.tuna.tsinghua.edu.cn/rustup/rustup"; \
+         echo "Using TUNA mirrors for Rustup."; \
+       fi; \
+    # Force curl to use HTTP/1.1
+    curl --proto '=https' --tlsv1.2 --http1.1 -sSf https://sh.rustup.rs | bash -s -- -y --profile minimal \
+    && echo 'export PATH="/root/.cargo/bin:${PATH}"' >> /root/.bashrc
+
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+RUN cargo --version && rustc --version
 
 # Add msssql ODBC driver
 # macOS ARM64 environment, install msodbcsql18.
@@ -91,6 +115,8 @@ RUN --mount=type=cache,id=ragflow_apt,target=/var/cache/apt,sharing=locked \
         ACCEPT_EULA=Y apt install -y unixodbc-dev msodbcsql17; \
     fi || \
     { echo "Failed to install ODBC driver"; exit 1; }
+
+
 
 # Add dependencies of selenium
 RUN --mount=type=bind,from=infiniflow/ragflow_deps:latest,source=/chrome-linux64-121-0-6167-85,target=/chrome-linux64.zip \
@@ -111,46 +137,24 @@ RUN --mount=type=bind,from=infiniflow/ragflow_deps:latest,source=/,target=/deps 
         dpkg -i /deps/libssl1.1_1.1.1f-1ubuntu2_arm64.deb; \
     fi
 
-FROM base AS base_builder
-ARG NEED_MIRROR=0
 
-# nodejs 12.22 on Ubuntu 22.04 is too old
-RUN --mount=type=cache,id=ragflow_apt,target=/var/cache/apt,sharing=locked \
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt purge -y nodejs npm cargo && \
-    # apt autoremove -y && \
-    apt update && \
-    apt install -y nodejs
+# builder stage
+FROM base AS builder
+USER root
 
-# A modern version of cargo is needed for the latest version of the Rust compiler.
-RUN apt update && apt install -y curl build-essential \
-    && if [ "$NEED_MIRROR" == "1" ]; then \
-         # Use TUNA mirrors for rustup/rust dist files
-         export RUSTUP_DIST_SERVER="https://mirrors.tuna.tsinghua.edu.cn/rustup"; \
-         export RUSTUP_UPDATE_ROOT="https://mirrors.tuna.tsinghua.edu.cn/rustup/rustup"; \
-         echo "Using TUNA mirrors for Rustup."; \
-       fi; \
-    # Force curl to use HTTP/1.1
-    curl --proto '=https' --tlsv1.2 --http1.1 -sSf https://sh.rustup.rs | bash -s -- -y --profile minimal \
-    && echo 'export PATH="/root/.cargo/bin:${PATH}"' >> /root/.bashrc
-
-ENV PATH="/root/.cargo/bin:${PATH}"
-
-RUN cargo --version && rustc --version && which uv && uv --version
-
-FROM base_builder AS builder
-ARG NEED_MIRROR=0
 WORKDIR /ragflow
 
-# 切换 pip/uv 源（阿里）
+# install dependencies from uv.lock file
 COPY pyproject.toml uv.lock ./
-RUN if [ "$NEED_MIRROR" == "1" ]; then \
-    pip3 config set global.index-url https://mirrors.aliyun.com/pypi/simple && \
-    pip3 config set global.trusted-host mirrors.aliyun.com && \
-    sed -i 's|pypi.org|mirrors.aliyun.com/pypi|g' uv.lock; \
+
+# https://github.com/astral-sh/uv/issues/10462
+# uv records index url into uv.lock but doesn't failover among multiple indexes
+RUN --mount=type=cache,id=ragflow_uv,target=/root/.cache/uv,sharing=locked \
+    if [ "$NEED_MIRROR" == "1" ]; then \
+        sed -i 's|pypi.org|mirrors.aliyun.com/pypi|g' uv.lock; \
     else \
-    sed -i 's|mirrors.aliyun.com/pypi|pypi.org|g' uv.lock; \
-    fi && \
+        sed -i 's|mirrors.aliyun.com/pypi|pypi.org|g' uv.lock; \
+    fi; \
     if [ "$LIGHTEN" == "1" ]; then \
         uv sync --python 3.10 --frozen; \
     else \
@@ -173,6 +177,7 @@ RUN version_info=$(git describe --tags --match=v* --first-parent --always); \
     echo "RAGFlow version: $version_info"; \
     echo $version_info > /ragflow/VERSION
 
+# production stage
 FROM base AS production
 USER root
 
@@ -185,7 +190,7 @@ ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 
 ENV PYTHONPATH=/ragflow/
 
-# COPY web web
+COPY web web
 COPY api api
 COPY conf conf
 COPY deepdoc deepdoc
