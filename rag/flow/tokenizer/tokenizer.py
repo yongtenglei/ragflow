@@ -133,7 +133,7 @@ class Tokenizer(ProcessBase):
                     ck["content_ltks"] = rag_tokenizer.tokenize(kwargs.get(kwargs["output_format"], ""))
                     ck["content_sm_ltks"] = rag_tokenizer.fine_grained_tokenize(ck["content_ltks"])
                 chunks = [ck]
-            else:
+            else:  # json
                 chunks = from_upstream.json_result
                 for i, ck in enumerate(chunks):
                     ck["content_ltks"] = rag_tokenizer.tokenize(ck["text"])
