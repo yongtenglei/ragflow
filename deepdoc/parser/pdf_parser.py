@@ -34,7 +34,7 @@ from pypdf import PdfReader as pdf2_read
 
 from api import settings
 from api.utils.file_utils import get_project_base_directory
-from deepdoc.vision import OCR, LayoutRecognizer, Recognizer, TableStructureRecognizer
+from deepdoc.vision import OCR, LayoutRecognizer, Recognizer, TableStructureRecognizer, AscendLayoutRecognizer
 from rag.app.picture import vision_llm_chunk as picture_vision_llm_chunk
 from rag.nlp import rag_tokenizer
 from rag.prompts import vision_llm_describe_prompt
@@ -65,9 +65,13 @@ class RAGFlowPdfParser:
             self.parallel_limiter = [trio.CapacityLimiter(1) for _ in range(PARALLEL_DEVICES)]
 
         if hasattr(self, "model_speciess"):
-            self.layouter = LayoutRecognizer("layout." + self.model_speciess)
+            # self.layouter = LayoutRecognizer("layout." + self.model_speciess)
+            self.layouter = AscendLayoutRecognizer("layout." + self.model_speciess)
         else:
-            self.layouter = LayoutRecognizer("layout")
+            # self.layouter = LayoutRecognizer("layout")
+            print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@",flush=True)
+            print("Using AscendLayoutRecognizer", flush=True)
+            self.layouter = AscendLayoutRecognizer("layout")
         self.tbl_det = TableStructureRecognizer()
 
         self.updown_cnt_mdl = xgb.Booster()

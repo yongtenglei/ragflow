@@ -17,13 +17,32 @@
 import logging
 import os
 import PIL
-from PIL import ImageDraw
-
+from PIL import ImageDraw, Image
+from PIL import Image
+import numpy as np
 
 def save_results(image_list, results, labels, output_dir='output/', threshold=0.5):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
+    
     for idx, im in enumerate(image_list):
+        print("#########################", flush=True)
+        print(f"{results[idx]=}",flush=True)
+        # Convert PyTorch-style tensor (1, C, H, W) to PIL Image
+        if isinstance(im, np.ndarray):
+            # Remove batch dimension (1, C, H, W) -> (C, H, W)
+            if im.shape[0] == 1:
+                im = im.squeeze(0)
+            
+            # Transpose (C, H, W) -> (H, W, C)
+            im = np.transpose(im, (1, 2, 0))
+            
+            # Convert float32 [0, 1] to uint8 [0, 255]
+            if im.dtype == np.float32:
+                im = (im * 255).astype(np.uint8)
+            
+            # Convert to PIL Image
+            im = Image.fromarray(im, mode='RGB')
         im = draw_box(im, results[idx], labels, threshold=threshold)
 
         out_path = os.path.join(output_dir, f"{idx}.jpg")
@@ -33,26 +52,33 @@ def save_results(image_list, results, labels, output_dir='output/', threshold=0.
 
 def draw_box(im, result, labels, threshold=0.5):
     draw_thickness = min(im.size) // 320
+    print(f"{draw_thickness=}", flush=True)
     draw = ImageDraw.Draw(im)
     color_list = get_color_map_list(len(labels))
     clsid2color = {n.lower():color_list[i] for i,n in enumerate(labels)}
-    result = [r for r in result if r["score"] >= threshold]
+    print(f"{color_list=}", flush=True)
+    print(f"{clsid2color=}", flush=True)
+    # print("**************", flush=True)
+    # for r in result:
+    #     print(f"{r=}", flush=True)
+    # result = [r for r in result if r["score"] >= threshold]
+    # print("**************", flush=True)
+    # for dt in result:
+    dt = result
+    color = tuple(clsid2color[dt["type"]])
+    xmin, ymin, xmax, ymax = dt["bbox"]
+    draw.line(
+        [(xmin, ymin), (xmin, ymax), (xmax, ymax), (xmax, ymin),
+            (xmin, ymin)],
+        width=draw_thickness,
+        fill=color)
 
-    for dt in result:
-        color = tuple(clsid2color[dt["type"]])
-        xmin, ymin, xmax, ymax = dt["bbox"]
-        draw.line(
-            [(xmin, ymin), (xmin, ymax), (xmax, ymax), (xmax, ymin),
-             (xmin, ymin)],
-            width=draw_thickness,
-            fill=color)
-
-        # draw label
-        text = "{} {:.4f}".format(dt["type"], dt["score"])
-        tw, th = imagedraw_textsize_c(draw, text)
-        draw.rectangle(
-            [(xmin + 1, ymin - th), (xmin + tw + 1, ymin)], fill=color)
-        draw.text((xmin + 1, ymin - th), text, fill=(255, 255, 255))
+    # draw label
+    text = "{} {:.4f}".format(dt["type"], dt["score"])
+    tw, th = imagedraw_textsize_c(draw, text)
+    draw.rectangle(
+        [(xmin + 1, ymin - th), (xmin + tw + 1, ymin)], fill=color)
+    draw.text((xmin + 1, ymin - th), text, fill=(255, 255, 255))
     return im
 
 

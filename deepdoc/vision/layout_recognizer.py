@@ -73,7 +73,15 @@ class LayoutRecognizer(Recognizer):
             layouts = self.client.predict(image_list)
         else:
             layouts = super().__call__(image_list, thr, batch_size)
-        # save_results(image_list, layouts, self.labels, output_dir='output/', threshold=0.7)
+            # save_results(image_list, layouts, self.labels, output_dir='output/', threshold=0.7)
+            print("##################", flush=True)
+            print(f"{layouts[:5]=}", flush=True)
+            print(f"{len(layouts)=}", flush=True)
+            print(f"{len(image_list)=}", flush=True)
+            print(f"{type(image_list[0])=}", flush=True)
+            print(f"{image_list[0].size=}", flush=True)
+
+            print("##################", flush=True)
         assert len(image_list) == len(ocr_res)
         # Tag layout type
         boxes = []
@@ -159,7 +167,12 @@ class LayoutRecognizer(Recognizer):
                 if c > 1:
                     garbag_set.add(g)
 
+        print(f"old_{len(ocr_res)=}", flush=True)
         ocr_res = [b for b in ocr_res if b["text"].strip() not in garbag_set]
+        print(f"new_{ocr_res[:5]=}", flush=True)
+        print(f"new_{len(ocr_res)=}", flush=True)
+        print(f"{len(page_layout)=}", flush=True)
+        print(f"{page_layout=}", flush=True)
         return ocr_res, page_layout
 
     def forward(self, image_list, thr=0.7, batch_size=16):
@@ -193,6 +206,7 @@ class LayoutRecognizer4YOLOv10(LayoutRecognizer):
         inputs = []
         new_shape = self.input_shape  # height, width
         for img in image_list:
+            print(f"in preprocess {img.shape=}", flush=True)           
             shape = img.shape[:2]  # current shape [height, width]
             # Scale ratio (new / old)
             r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
@@ -212,6 +226,7 @@ class LayoutRecognizer4YOLOv10(LayoutRecognizer):
             img /= 255.0
             img = img.transpose(2, 0, 1)
             img = img[np.newaxis, :, :, :].astype(np.float32)
+            print(f"in preprocess after transpose {img.shape=}", flush=True)
             inputs.append({self.input_names[0]: img, "scale_factor": [shape[1]/ww, shape[0]/hh, dw, dh]})
 
         return inputs

@@ -1,6 +1,7 @@
 ragflow:
   host: 0.0.0.0
-  http_port: 9380
+  http_port: 9394
+  secret_key: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 mysql:
   name: 'rag_flow'
   user: 'root'
@@ -26,7 +27,7 @@ infinity:
   uri: 'localhost:23817'
   db_name: 'default_db'
 redis:
-  db: 1
+  db: 5
   password: 'infini_rag_flow'
   host: 'localhost:6379'
 # postgres:
