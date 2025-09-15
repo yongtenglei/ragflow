@@ -74,12 +74,10 @@ class RAGFlowPdfParser:
             recognizer_domain = "layout"
 
         if layout_recognizer_type == "ascend":
-            print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@", flush=True)
-            print("Using Ascend LayoutRecognizer", flush=True)
+            logging.debug("Using Ascend LayoutRecognizer", flush=True)
             self.layouter = AscendLayoutRecognizer(recognizer_domain)
         else:  # onnx
-            print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@", flush=True)
-            print("Using Onnx LayoutRecognizer", flush=True)
+            logging.debug("Using Onnx LayoutRecognizer", flush=True)
             self.layouter = LayoutRecognizer(recognizer_domain)
         self.tbl_det = TableStructureRecognizer()
 
