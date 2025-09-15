@@ -14,6 +14,8 @@
 #  limitations under the License.
 #
 
+import logging
+import math
 import os
 import re
 from collections import Counter
@@ -389,14 +391,6 @@ class AscendLayoutRecognizer(Recognizer):
                     print(f"{feeds[0].shape=}", flush=True)
 
                     print("##################", flush=True)
-
-                    # try:
-                    print(f"feeds shape: {feeds[0].shape}, dtype: {feeds[0].dtype}")
-                    from deepdoc.vision.seeit import save_results
-
-                    save_results(feeds, lts, self.labels, output_dir="output/", threshold=conf_thr)
-                    # except Exception as e:
-                    # print(f"ERROR see it {e}", flush=True)
 
                     # 统一为后续所需字段
                     page_lts = []
