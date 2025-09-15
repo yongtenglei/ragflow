@@ -64,14 +64,25 @@ class RAGFlowPdfParser:
         if PARALLEL_DEVICES > 1:
             self.parallel_limiter = [trio.CapacityLimiter(1) for _ in range(PARALLEL_DEVICES)]
 
+        layout_recognizer_type = os.getenv("LAYOUT_RECOGNIZER_TYPE", "onnx").lower()
+
+        if layout_recognizer_type not in ["onnx", "ascend"]:
+            raise RuntimeError("Unsupported layout recognizer type.")
+
         if hasattr(self, "model_speciess"):
-            # self.layouter = LayoutRecognizer("layout." + self.model_speciess)
-            self.layouter = AscendLayoutRecognizer("layout." + self.model_speciess)
+            recognizer_domain = "layout." + self.model_speciess
         else:
-            # self.layouter = LayoutRecognizer("layout")
-            print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@",flush=True)
-            print("Using AscendLayoutRecognizer", flush=True)
-            self.layouter = AscendLayoutRecognizer("layout")
+            recognizer_domain = "layout"
+
+        if layout_recognizer_type == "ascend":
+            print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@", flush=True)
+            print(f"Using Ascend LayoutRecognizer", flush=True)
+            self.layouter = AscendLayoutRecognizer(recognizer_domain)
+        else:  # onnx
+            print("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@", flush=True)
+            print(f"Using Onnx LayoutRecognizer", flush=True)
+            self.layouter = LayoutRecognizer(recognizer_domain)
+
         self.tbl_det = TableStructureRecognizer()
 
         self.updown_cnt_mdl = xgb.Booster()
