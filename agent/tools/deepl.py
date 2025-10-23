@@ -45,6 +45,33 @@ class DeepLParam(ComponentParamBase):
 class DeepL(ComponentBase, ABC):
     component_name = "DeepL"
 
+    def _invoke(self, **kwargs):
+        if self.check_if_canceled("DeepL processing"):
+            return
+
+        ans = self.get_input()
+        ans = " - ".join(ans["content"]) if "content" in ans else ""
+        if not ans:
+            self.set_output("result", "")
+            return ""
+
+        try:
+            if self.check_if_canceled("DeepL processing"):
+                return
+
+            translator = deepl.Translator(self._param.auth_key)
+            result = translator.translate_text(ans, source_lang=self._param.source_lang,
+                                               target_lang=self._param.target_lang)
+
+            self.set_output("result", result.text)
+            return result.text
+        except Exception as e:
+            if self.check_if_canceled("DeepL processing"):
+                return
+
+            self.set_output("_ERROR", "**Error**:" + str(e))
+            return "**Error**:" + str(e)
+
     def _run(self, history, **kwargs):
         ans = self.get_input()
         ans = " - ".join(ans["content"]) if "content" in ans else ""

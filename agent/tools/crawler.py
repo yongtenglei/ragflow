@@ -13,6 +13,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
+import logging
 from abc import ABC
 import asyncio
 from crawl4ai import AsyncWebCrawler
@@ -29,13 +30,43 @@ class CrawlerParam(ToolParamBase):
         super().__init__()
         self.proxy = None
         self.extract_type = "markdown"
-    
+
     def check(self):
         self.check_valid_value(self.extract_type, "Type of content from the crawler", ['html', 'markdown', 'content'])
 
 
 class Crawler(ToolBase, ABC):
     component_name = "Crawler"
+
+    def _invoke(self, **kwargs):
+        if self.check_if_canceled("Crawler processing"):
+            return
+
+        from api.utils.web_utils import is_valid_url
+        ans = self.get_input()
+        ans = " - ".join(ans["content"]) if "content" in ans else ""
+        if not is_valid_url(ans):
+            self.set_output("_ERROR", "URL not valid")
+            return "URL not valid"
+
+        try:
+            if self.check_if_canceled("Crawler processing"):
+                return
+
+            result = asyncio.run(self.get_web(ans))
+
+            if self.check_if_canceled("Crawler processing"):
+                return
+
+            self.set_output("result", result)
+            return result
+
+        except Exception as e:
+            if self.check_if_canceled("Crawler processing"):
+                return
+
+            self.set_output("_ERROR", f"An unexpected error occurred: {str(e)}")
+            return f"An unexpected error occurred: {str(e)}"
 
     def _run(self, history, **kwargs):
         from api.utils.web_utils import is_valid_url
@@ -47,18 +78,28 @@ class Crawler(ToolBase, ABC):
             result = asyncio.run(self.get_web(ans))
 
             return Crawler.be_output(result)
-            
+
         except Exception as e:
             return Crawler.be_output(f"An unexpected error occurred: {str(e)}")
 
     async def get_web(self, url):
+        # Check if task is canceled before starting async operation
+        if self.is_canceled():
+            logging.info(f"Task {self._canvas.task_id} has been canceled during Crawler async operation.")
+            raise Exception("Task has been canceled")
+
         proxy = self._param.proxy if self._param.proxy else None
         async with AsyncWebCrawler(verbose=True, proxy=proxy) as crawler:
             result = await crawler.arun(
                 url=url,
                 bypass_cache=True
             )
-            
+
+            # Check if task is canceled after async operation
+            if self.is_canceled():
+                logging.info(f"Task {self._canvas.task_id} has been canceled during Crawler async operation.")
+                raise Exception("Task has been canceled")
+
             if self._param.extract_type == 'html':
                 return result.cleaned_html
             elif self._param.extract_type == 'markdown':

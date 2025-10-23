@@ -125,6 +125,13 @@ class ToolBase(ComponentBase):
         return self._param.get_meta()
 
     def invoke(self, **kwargs):
+        # Check if task is canceled before starting
+        if self.is_canceled():
+            logging.info(f"Task {self._canvas.task_id} has been canceled before Tool processing.")
+            self._param.outputs["_ERROR"] = {"value": "Task has been canceled"}
+            self.set_output("_elapsed_time", 0)
+            return "Task has been canceled"
+
         self.set_output("_created_time", time.perf_counter())
         try:
             res = self._invoke(**kwargs)

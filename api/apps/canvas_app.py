@@ -156,7 +156,8 @@ def run():
         return get_json_result(data={"message_id": task_id})
 
     try:
-        canvas = Canvas(cvs.dsl, current_user.id, req["id"])
+        # canvas = Canvas(cvs.dsl, current_user.id, req["id"])
+        canvas = Canvas(cvs.dsl, current_user.id)
     except Exception as e:
         return server_error_response(e)
 
@@ -168,8 +169,16 @@ def run():
 
             cvs.dsl = json.loads(str(canvas))
             UserCanvasService.update_by_id(req["id"], cvs.to_dict())
+            return
+
+        except (GeneratorExit, BrokenPipeError):
+            print("sse ggggggggggggggggggggggggg 22222222222222222222222222",flush=True)
+            canvas.cancel_task()
+            return
         except Exception as e:
+            print("👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠👠",flush=True)
             logging.exception(e)
+            canvas.cancel_task()
             yield "data:" + json.dumps({"code": 500, "message": str(e), "data": False}, ensure_ascii=False) + "\n\n"
 
     resp = Response(sse(), mimetype="text/event-stream")
@@ -430,7 +439,7 @@ def test_db_connect():
             catalog, schema = _parse_catalog_schema(req["database"])
             if not catalog:
                 return server_error_response("For Trino, 'database' must be 'catalog.schema' or at least 'catalog'.")
-            
+
             http_scheme = "https" if os.environ.get("TRINO_USE_TLS", "0") == "1" else "http"
 
             auth = None

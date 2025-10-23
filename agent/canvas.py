@@ -26,6 +26,7 @@ from typing import Any, Union, Tuple
 from agent.component import component_class
 from agent.component.base import ComponentBase
 from api.db.services.file_service import FileService
+from api.db.services.task_service import has_canceled
 from api.utils import get_uuid, hash_str2int
 from rag.prompts.generator import chunks_format
 from rag.utils.redis_conn import REDIS_CONN
@@ -126,6 +127,7 @@ class Graph:
             self.components[k]["obj"].reset()
         try:
             REDIS_CONN.delete(f"{self.task_id}-logs")
+            REDIS_CONN.delete(f"{self.task_id}-cancel")
         except Exception as e:
             logging.exception(e)
 
@@ -163,6 +165,17 @@ class Graph:
             raise Exception(f"Can't find variable: '{cpn_id}@{var_nm}'")
         return cpn["obj"].output(var_nm)
 
+    def is_canceled(self) -> bool:
+        return has_canceled(self.task_id)
+
+    def cancel_task(self) -> bool:
+        try:
+            REDIS_CONN.set(f"{self.task_id}-cancel", "x")
+        except Exception as e:
+            logging.exception(e)
+            return False
+        return True
+
 
 class Canvas(Graph):
 
@@ -187,7 +200,7 @@ class Canvas(Graph):
             "sys.conversation_turns": 0,
             "sys.files": []
         }
-            
+
         self.retrieval = self.dsl["retrieval"]
         self.memory = self.dsl.get("memory", [])
 
@@ -250,10 +263,18 @@ class Canvas(Graph):
             self.path.append("begin")
             self.retrieval.append({"chunks": [], "doc_aggs": []})
 
+        if self.is_canceled():
+            logging.info(f"Task {self.task_id} has been canceled before starting.")
+            return
+
         yield decorate("workflow_started", {"inputs": kwargs.get("inputs")})
         self.retrieval.append({"chunks": {}, "doc_aggs": {}})
 
         def _run_batch(f, t):
+            if self.is_canceled():
+                logging.info(f"Task {self.task_id} has been canceled during batch execution.")
+                raise Exception("Task has been canceled")
+
             with ThreadPoolExecutor(max_workers=5) as executor:
                 thr = []
                 for i in range(f, t):
@@ -401,6 +422,14 @@ class Canvas(Graph):
                            "created_at": st,
                        })
             self.history.append(("assistant", self.get_component_obj(self.path[-1]).output()))
+        elif "Task has been canceled" in self.error:
+            yield decorate("workflow_finished",
+                       {
+                           "inputs": kwargs.get("inputs"),
+                           "outputs": "Task has been canceled",
+                           "elapsed_time": time.perf_counter() - st,
+                           "created_at": st,
+                       })
 
     def is_reff(self, exp: str) -> bool:
         exp = exp.strip("{").strip("}")
