@@ -147,6 +147,7 @@ export const useSelectLlmOptionsByModelType = () => {
     ),
     [LlmModelType.Rerank]: groupOptionsByModelType(LlmModelType.Rerank),
     [LlmModelType.TTS]: groupOptionsByModelType(LlmModelType.TTS),
+    [LlmModelType.Ocr]: groupOptionsByModelType(LlmModelType.Ocr),
   };
 };
 
@@ -250,9 +251,14 @@ export const useSelectLlmList = () => {
   }, [myLlmList, factoryList]);
 
   const nextFactoryList = useMemo(() => {
-    const currentList = factoryList.filter((x) =>
-      Object.keys(myLlmList).every((y) => y !== x.name),
-    );
+    const currentList = factoryList.filter((x) => {
+      const mine = (myLlmList as Record<string, IMyLlmValue | undefined>)[
+        x.name
+      ];
+      const hasModels =
+        !!mine && Array.isArray(mine.llm) && mine.llm.length > 0;
+      return !hasModels;
+    });
     return currentList;
     // return sortLLmFactoryListBySpecifiedOrder(currentList);
   }, [factoryList, myLlmList]);

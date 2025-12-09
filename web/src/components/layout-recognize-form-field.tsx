@@ -69,7 +69,15 @@ export function LayoutRecognizeFormField({
       };
     });
 
-    return [...list, ...image2TextList];
+    const ocrList = (allOptions[LlmModelType.Ocr] || []).map((x) => ({
+      ...x,
+      options: x.options.map((y) => {
+        const [llmName] = String(y.value).split('@');
+        return { ...y, value: `MinerU@${llmName}` };
+      }),
+    }));
+
+    return [...list, ...ocrList, ...image2TextList];
   }, [allOptions, optionsWithoutLLM, t]);
 
   return (
