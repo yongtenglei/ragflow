@@ -30,6 +30,7 @@ from common import settings
 from common.constants import LLMType
 from common.misc_utils import get_uuid
 from deepdoc.parser import ExcelParser
+from deepdoc.parser.paddleocrvl_parser import PaddleOCRVLParser
 from deepdoc.parser.mineru_parser import MinerUParser
 from deepdoc.parser.pdf_parser import PlainParser, RAGFlowPdfParser, VisionParser
 from deepdoc.parser.tcadp_parser import TCADPParser
@@ -80,7 +81,7 @@ class ParserParam(ProcessParamBase):
 
         self.setups = {
             "pdf": {
-                "parse_method": "deepdoc",  # deepdoc/plain_text/tcadp_parser/vlm
+                "parse_method": "deepdoc",  # deepdoc/plain_text/mineru/paddleocrvl/tcadp_parser/vlm
                 "lang": "Chinese",
                 "suffix": [
                     "pdf",
@@ -177,7 +178,7 @@ class ParserParam(ProcessParamBase):
             pdf_parse_method = pdf_config.get("parse_method", "")
             self.check_empty(pdf_parse_method, "Parse method abnormal.")
 
-            if pdf_parse_method.lower() not in ["deepdoc", "plain_text", "mineru", "tcadp parser"]:
+            if pdf_parse_method.lower() not in ["deepdoc", "plain_text", "mineru", "tcadp parser", "paddleocrvl"]:
                 self.check_empty(pdf_config.get("lang", ""), "PDF VLM language")
 
             pdf_output_format = pdf_config.get("output_format", "")
@@ -253,6 +254,51 @@ class Parser(ProcessBase):
                 callback=self.callback,
                 output_dir=os.environ.get("MINERU_OUTPUT_DIR", ""),
                 delete_output=bool(int(os.environ.get("MINERU_DELETE_OUTPUT", 1))),
+            )
+            bboxes = []
+            for t, poss in lines:
+                box = {
+                    "image": pdf_parser.crop(poss, 1),
+                    "positions": [[pos[0][-1], *pos[1:]] for pos in pdf_parser.extract_positions(poss)],
+                    "text": t,
+                }
+                bboxes.append(box)
+        elif conf.get("parse_method").lower() == "paddleocrvl":
+            vl_rec_backend = os.environ.get("PADDLEOCRVL_BACKEND")
+            vl_rec_server_url = os.environ.get("PADDLEOCRVL_SERVER_URL")
+            use_chart_recognition = bool(int(os.environ.get("PADDLEOCRVL_USE_CHART", 0)))
+            format_block_content = bool(int(os.environ.get("PADDLEOCRVL_FORMAT_BLOCK", 1)))
+            use_layout_detection = bool(int(os.environ.get("PADDLEOCRVL_USE_LAYOUT", 1)))
+            use_doc_orientation_classify = bool(int(os.environ.get("PADDLEOCRVL_USE_DOC_ORIENTATION", 0)))
+            use_doc_unwarping = bool(int(os.environ.get("PADDLEOCRVL_USE_DOC_UNWARPING", 0)))
+            use_queues_env = os.environ.get("PADDLEOCRVL_USE_QUEUES")
+            use_queues = None if use_queues_env is None else bool(int(use_queues_env))
+            max_concurrency_env = os.environ.get("PADDLEOCRVL_MAX_CONCURRENCY")
+            max_concurrency = int(max_concurrency_env) if max_concurrency_env else None
+            api_key = os.environ.get("PADDLEOCRVL_API_KEY")
+
+            output_dir = os.environ.get("PADDLEOCRVL_OUTPUT_DIR", "") or None
+            delete_output = bool(int(os.environ.get("PADDLEOCRVL_DELETE_OUTPUT", 1)))
+
+            pdf_parser = PaddleOCRVLParser(vl_rec_backend=vl_rec_backend, vl_rec_server_url=vl_rec_server_url)
+            ok, reason = pdf_parser.check_installation(vl_rec_backend=vl_rec_backend, vl_rec_server_url=vl_rec_server_url)
+            if not ok:
+                raise RuntimeError(f"PaddleOCR-VL not available: {reason}. Please install paddleocr and its dependencies.")
+
+            lines, _ = pdf_parser.parse_pdf(
+                filepath=name,
+                binary=blob,
+                callback=self.callback,
+                output_dir=output_dir,
+                delete_output=delete_output,
+                format_block_content=format_block_content,
+                use_chart_recognition=use_chart_recognition,
+                use_layout_detection=use_layout_detection,
+                use_doc_orientation_classify=use_doc_orientation_classify,
+                use_doc_unwarping=use_doc_unwarping,
+                use_queues=use_queues,
+                vl_rec_max_concurrency=max_concurrency,
+                vl_rec_api_key=api_key,
             )
             bboxes = []
             for t, poss in lines:

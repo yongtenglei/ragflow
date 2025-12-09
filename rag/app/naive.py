@@ -35,6 +35,7 @@ from deepdoc.parser import DocxParser, ExcelParser, HtmlParser, JsonParser, Mark
 from deepdoc.parser.figure_parser import VisionFigureParser,vision_figure_parser_docx_wrapper,vision_figure_parser_pdf_wrapper
 from deepdoc.parser.pdf_parser import PlainParser, VisionParser
 from deepdoc.parser.mineru_parser import MinerUParser
+from deepdoc.parser.paddleocrvl_parser import PaddleOCRVLParser
 from deepdoc.parser.docling_parser import DoclingParser
 from deepdoc.parser.tcadp_parser import TCADPParser
 from rag.nlp import concat_img, find_codec, naive_merge, naive_merge_with_images, naive_merge_docx, rag_tokenizer, tokenize_chunks, tokenize_chunks_with_images, tokenize_table, attach_media_context
@@ -76,6 +77,49 @@ def by_mineru(filename, binary=None, from_page=0, to_page=100000, lang="Chinese"
         server_url=os.environ.get("MINERU_SERVER_URL", ""),
         delete_output=bool(int(os.environ.get("MINERU_DELETE_OUTPUT", 1))),
         parse_method=parse_method
+    )
+    return sections, tables, pdf_parser
+
+
+def by_paddleocrvl(filename, binary=None, from_page=0, to_page=100000, lang="Chinese", callback=None, pdf_cls=None, **kwargs):
+    parse_method = kwargs.get("parse_method", "raw")
+    vl_rec_backend = os.environ.get("PADDLEOCRVL_BACKEND")
+    vl_rec_server_url = os.environ.get("PADDLEOCRVL_SERVER_URL")
+    use_chart_recognition = bool(int(os.environ.get("PADDLEOCRVL_USE_CHART", 0)))
+    format_block_content = bool(int(os.environ.get("PADDLEOCRVL_FORMAT_BLOCK", 1)))
+    use_layout_detection = bool(int(os.environ.get("PADDLEOCRVL_USE_LAYOUT", 1)))
+    use_doc_orientation_classify = bool(int(os.environ.get("PADDLEOCRVL_USE_DOC_ORIENTATION", 0)))
+    use_doc_unwarping = bool(int(os.environ.get("PADDLEOCRVL_USE_DOC_UNWARPING", 0)))
+    use_queues_env = os.environ.get("PADDLEOCRVL_USE_QUEUES")
+    use_queues = None if use_queues_env is None else bool(int(use_queues_env))
+    max_concurrency_env = os.environ.get("PADDLEOCRVL_MAX_CONCURRENCY")
+    max_concurrency = int(max_concurrency_env) if max_concurrency_env else None
+    api_key = os.environ.get("PADDLEOCRVL_API_KEY")
+    output_dir = os.environ.get("PADDLEOCRVL_OUTPUT_DIR", "") or None
+    delete_output = bool(int(os.environ.get("PADDLEOCRVL_DELETE_OUTPUT", 1)))
+
+    pdf_parser = PaddleOCRVLParser(vl_rec_backend=vl_rec_backend, vl_rec_server_url=vl_rec_server_url)
+    ok, reason = pdf_parser.check_installation(vl_rec_backend=vl_rec_backend, vl_rec_server_url=vl_rec_server_url)
+    if not ok:
+        if callback:
+            callback(-1, f"PaddleOCR-VL not available: {reason}")
+        return None, None, pdf_parser
+
+    sections, tables = pdf_parser.parse_pdf(
+        filepath=filename,
+        binary=binary,
+        callback=callback,
+        output_dir=output_dir,
+        delete_output=delete_output,
+        format_block_content=format_block_content,
+        use_chart_recognition=use_chart_recognition,
+        use_layout_detection=use_layout_detection,
+        use_doc_orientation_classify=use_doc_orientation_classify,
+        use_doc_unwarping=use_doc_unwarping,
+        use_queues=use_queues,
+        vl_rec_max_concurrency=max_concurrency,
+        vl_rec_api_key=api_key,
+        parse_method=parse_method,
     )
     return sections, tables, pdf_parser
 
@@ -135,6 +179,7 @@ def by_plaintext(filename, binary=None, from_page=0, to_page=100000, callback=No
 PARSERS = {
     "deepdoc":  by_deepdoc,
     "mineru":   by_mineru,
+    "paddleocrvl": by_paddleocrvl,
     "docling":  by_docling,
     "tcadp":    by_tcadp,
     "plaintext": by_plaintext,  # default
@@ -717,7 +762,7 @@ def chunk(filename, binary=None, from_page=0, to_page=100000, lang="Chinese", ca
         if not sections and not tables:
             return []
 
-        if name in ["tcadp", "docling", "mineru"]:
+        if name in ["tcadp", "docling", "mineru", "paddleocrvl"]:
             parser_config["chunk_token_num"] = 0
 
         res = tokenize_table(tables, doc, is_english)

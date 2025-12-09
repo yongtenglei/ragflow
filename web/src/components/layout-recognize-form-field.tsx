@@ -20,6 +20,7 @@ export const enum ParseDocumentType {
   MinerU = 'MinerU',
   Docling = 'Docling',
   TCADPParser = 'TCADP Parser',
+  PaddleOCRVL = 'PaddleOCRVL',
 }
 
 export function LayoutRecognizeFormField({
@@ -47,8 +48,14 @@ export function LayoutRecognizeFormField({
           ParseDocumentType.MinerU,
           ParseDocumentType.Docling,
           ParseDocumentType.TCADPParser,
+          ParseDocumentType.PaddleOCRVL,
         ].map((x) => ({
-          label: x === ParseDocumentType.PlainText ? t(camelCase(x)) : x,
+          label:
+            x === ParseDocumentType.PlainText
+              ? t(camelCase(x))
+              : x === ParseDocumentType.PaddleOCRVL
+                ? 'PaddleOCR-VL'
+                : x,
           value: x,
         }));
 

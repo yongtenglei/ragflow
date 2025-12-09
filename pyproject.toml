@@ -154,6 +154,8 @@ dependencies = [
     "exceptiongroup>=1.3.0,<2.0.0",
     "ffmpeg-python>=0.2.0",
     "imageio-ffmpeg>=0.6.0",
+    "paddleocr[doc-parser]>=3.3.2",
+    "paddlepaddle>=3.2.2",
 ]
 
 [dependency-groups]
@@ -171,6 +173,9 @@ test = [
     "requests>=2.32.2",
     "requests-toolbelt>=1.0.0",
 ]
+
+[[tool.uv.index]]
+url = "https://mirrors.aliyun.com/pypi/simple"
 
 [[tool.uv.index]]
 url = "https://pypi.tuna.tsinghua.edu.cn/simple"
