@@ -14,7 +14,7 @@
 #  limitations under the License.
 #
 import pytest
-from common import create_chat_assistant, list_chat_assistants, update_chat_assistant
+from common import create_chat_assistant, get_chat_assistant, update_chat_assistant
 from configs import CHAT_ASSISTANT_NAME_LIMIT, INVALID_API_TOKEN
 from libs.auth import RAGFlowHttpApiAuth
 from utils import encode_avatar
@@ -58,8 +58,8 @@ class TestChatAssistantUpdate:
         res = update_chat_assistant(HttpApiAuth, chat_assistant_ids[0], payload)
         assert res["code"] == expected_code, res
         if expected_code == 0:
-            res = list_chat_assistants(HttpApiAuth, {"id": chat_assistant_ids[0]})
-            assert res["data"][0]["name"] == payload.get("name")
+            res = get_chat_assistant(HttpApiAuth, chat_assistant_ids[0])
+            assert res["data"]["name"] == payload.get("name")
         else:
             assert res["message"] == expected_message
 
@@ -83,8 +83,8 @@ class TestChatAssistantUpdate:
         res = update_chat_assistant(HttpApiAuth, chat_assistant_ids[0], payload)
         assert res["code"] == expected_code, res
         if expected_code == 0:
-            res = list_chat_assistants(HttpApiAuth, {"id": chat_assistant_ids[0]})
-            assert res["data"][0]["name"] == payload.get("name")
+            res = get_chat_assistant(HttpApiAuth, chat_assistant_ids[0])
+            assert res["data"]["name"] == payload.get("name")
         else:
             assert res["message"] == expected_message
 
@@ -139,17 +139,17 @@ class TestChatAssistantUpdate:
         res = update_chat_assistant(HttpApiAuth, chat_assistant_ids[0], payload)
         assert res["code"] == expected_code
         if expected_code == 0:
-            res = list_chat_assistants(HttpApiAuth, {"id": chat_assistant_ids[0]})
+            res = get_chat_assistant(HttpApiAuth, chat_assistant_ids[0])
             if llm:
                 for k, v in llm.items():
-                    assert res["data"][0]["llm"][k] == v
+                    assert res["data"]["llm"][k] == v
             else:
-                assert res["data"][0]["llm"]["model_name"] == "glm-4-flash@ZHIPU-AI"
-                assert res["data"][0]["llm"]["temperature"] == 0.1
-                assert res["data"][0]["llm"]["top_p"] == 0.3
-                assert res["data"][0]["llm"]["presence_penalty"] == 0.4
-                assert res["data"][0]["llm"]["frequency_penalty"] == 0.7
-                assert res["data"][0]["llm"]["max_tokens"] == 512
+                assert res["data"]["llm"]["model_name"] == "glm-4-flash@ZHIPU-AI"
+                assert res["data"]["llm"]["temperature"] == 0.1
+                assert res["data"]["llm"]["top_p"] == 0.3
+                assert res["data"]["llm"]["presence_penalty"] == 0.4
+                assert res["data"]["llm"]["frequency_penalty"] == 0.7
+                assert res["data"]["llm"]["max_tokens"] == 512
         else:
             assert expected_message in res["message"]
 
@@ -207,24 +207,24 @@ class TestChatAssistantUpdate:
         res = update_chat_assistant(HttpApiAuth, chat_assistant_ids[0], payload)
         assert res["code"] == expected_code
         if expected_code == 0:
-            res = list_chat_assistants(HttpApiAuth, {"id": chat_assistant_ids[0]})
+            res = get_chat_assistant(HttpApiAuth, chat_assistant_ids[0])
             if prompt:
                 for k, v in prompt.items():
                     if k == "keywords_similarity_weight":
-                        assert res["data"][0]["prompt"][k] == 1 - v
+                        assert res["data"]["prompt"][k] == 1 - v
                     else:
-                        assert res["data"][0]["prompt"][k] == v
+                        assert res["data"]["prompt"][k] == v
             else:
-                assert res["data"]["prompt"][0]["similarity_threshold"] == 0.2
-                assert res["data"]["prompt"][0]["keywords_similarity_weight"] == 0.7
-                assert res["data"]["prompt"][0]["top_n"] == 6
-                assert res["data"]["prompt"][0]["variables"] == [{"key": "knowledge", "optional": False}]
-                assert res["data"]["prompt"][0]["rerank_model"] == ""
-                assert res["data"]["prompt"][0]["empty_response"] == "Sorry! No relevant content was found in the knowledge base!"
-                assert res["data"]["prompt"][0]["opener"] == "Hi! I'm your assistant. What can I do for you?"
-                assert res["data"]["prompt"][0]["show_quote"] is True
+                assert res["data"]["prompt"]["similarity_threshold"] == 0.2
+                assert res["data"]["prompt"]["keywords_similarity_weight"] == 0.7
+                assert res["data"]["prompt"]["top_n"] == 6
+                assert res["data"]["prompt"]["variables"] == [{"key": "knowledge", "optional": False}]
+                assert res["data"]["prompt"]["rerank_model"] == ""
+                assert res["data"]["prompt"]["empty_response"] == "Sorry! No relevant content was found in the knowledge base!"
+                assert res["data"]["prompt"]["opener"] == "Hi! I'm your assistant. What can I do for you?"
+                assert res["data"]["prompt"]["show_quote"] is True
                 assert (
-                    res["data"]["prompt"][0]["prompt"]
+                    res["data"]["prompt"]["prompt"]
                     == 'You are an intelligent assistant. Please summarize the content of the dataset to answer the question. Please list the data in the dataset and answer in detail. When all dataset content is irrelevant to the question, your answer must include the sentence "The answer you are looking for is not found in the dataset!" Answers need to consider chat history.\n      Here is the knowledge base:\n      {knowledge}\n      The above is the knowledge base.'
                 )
         else:
@@ -276,9 +276,9 @@ class TestChatAssistantUpdate:
 
         res = update_chat_assistant(HttpApiAuth, chat_id, {"avatar": "raw-avatar-value"})
         assert res["code"] == 0
-        listed = list_chat_assistants(HttpApiAuth, {"id": chat_id})
+        listed = get_chat_assistant(HttpApiAuth, chat_id)
         assert listed["code"] == 0
-        assert listed["data"][0]["avatar"] == "raw-avatar-value"
+        assert listed["data"]["avatar"] == "raw-avatar-value"
 
     @pytest.mark.p2
     def test_update_unparsed_dataset_guard_p2(self, HttpApiAuth, add_dataset_func, clear_chat_assistants):
